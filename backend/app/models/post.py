@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field # type: ignore
 from typing import Optional
 from datetime import datetime
 
@@ -26,7 +26,7 @@ class Post(BaseModel):
 
 class PostUpdate(BaseModel):
     id: Optional[str] = Field(None, alias="_id")
-    created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
+    created_at: Optional[datetime] = Field(default_factory=datetime.now)
     slug: str=None
     title: Optional[str] = None
     desc: Optional[str] = None

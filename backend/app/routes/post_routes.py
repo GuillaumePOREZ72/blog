@@ -1,11 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException # type: ignore
 from app.models.post import Post, PostUpdate
 from app.config import db
 from uuid import uuid4
 
 
 router = APIRouter()
-
 
 # Helper to convert MongoDB ObjectId to string
 def post_helper(post) -> dict:

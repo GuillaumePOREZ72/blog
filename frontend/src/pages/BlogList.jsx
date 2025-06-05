@@ -1,3 +1,4 @@
+import React from "react";
 import { useState, useEffect } from "react";
 import { HiOutlinePencilAlt } from "react-icons/hi";
 import BlogCard from "../components/BlogCard";

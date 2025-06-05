@@ -1,4 +1,4 @@
-from motor.motor_asyncio import AsyncIOMotorClient
+from motor.motor_asyncio import AsyncIOMotorClient # type: ignore
 
 #Mongo URI
 MONGO_URI = "mongodb+srv://porezguillaumegp:R0EC5EIknaY9xgjL@guiguiblog.3thevus.mongodb.net/"
