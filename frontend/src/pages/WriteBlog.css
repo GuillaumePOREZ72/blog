@@ -1,16 +1,17 @@
 /* Basic editor styles */
 .tiptap {
-    min-height: calc(100vh-2rem);
-    border: none;
-    outline: none;
-    background-color: transparent;
-    padding-top: 25px;
-    padding-bottom: 25px;
-    font-size: 18px;
-  
-    :first-child {
+  min-height: calc(100vh-2rem);
+  border: none;
+  outline: none;
+  background-color: transparent;
+  padding-top: 25px;
+  padding-bottom: 25px;
+  font-size: 18px;
+  position: relative;
+
+  :first-child {
     margin-top: 0;
-    }
+  }
 
   /* List styles */
   ul,
@@ -96,4 +97,13 @@
     border-top: 1px solid var(--gray-2);
     margin: 2rem 0;
   }
+}
+
+/* Placeholder style for empty paragraph */
+p.is-empty::before {
+  content: attr(data-placeholder) !important;
+  float: left;
+  color: #adb5bd !important;
+  pointer-events: none;
+  height: 0;
 }

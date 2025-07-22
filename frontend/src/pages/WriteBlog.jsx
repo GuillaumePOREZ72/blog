@@ -3,35 +3,59 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
 import Heading from "@tiptap/extension-heading";
-import Bold from "@tiptap/extension-bold";
-import Italic from "@tiptap/extension-italic";
 import Underline from "@tiptap/extension-underline";
 import CodeBlock from "@tiptap/extension-code-block";
 import Link from "@tiptap/extension-link";
+import Placeholder from "@tiptap/extension-placeholder";
 import "./WriteBlog.css";
+import { uploadImage } from "../utils/cloudinary";
+import axios from "axios";
+import { useNavigate } from "react-router-dom";
+import { IoIosCloseCircleOutline } from "react-icons/io";
+import BackButton from '../components/BackButton';
 
-export default function WriteBlog() {
-  const [editorContent, setEditorContent] = useState("<p>Type here...</p>");
+export default function WriteBlog(
+  isEdit = false,
+  idData,
+  titleData,
+  descData,
+  contentData,
+  slugData,
+  imgData,
+  onClickEdit
+) {
+  const [title, setTitle] = useState(isEdit ? titleData : "");
+  const [desc, setDesc] = useState(isEdit ? descData : "");
+  const [slug, setSlug] = useState(isEdit ? slugData : "");
+  const [media, setMedia] = useState(isEdit ? imgData : "");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  const [editorContent, setEditorContent] = useState(
+    isEdit ? contentData : "<p>Type Here...</p>"
+  );
   const fileInputRef = useRef(null);
-  const [media, setMedia] = useState("");
+
+  const navigate = useNavigate();
 
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      StarterKit.configure({
+        heading: {
+          levels: [1, 2, 3],
+        },
+      }),
       Image,
       Link.configure({
         autolink: true,
         openOnClick: true,
       }),
-      Heading.configure({
-        levels: [1, 2, 3],
-      }),
-      Bold,
-      Italic,
       Underline,
-      CodeBlock,
+      Placeholder.configure({
+        placeholder: "Type here...",
+      }),
     ],
-    content: "<p>Type here...</p>",
+    content: isEdit ? contentData : "<p>Type Here...</p>",
     onUpdate: ({ editor }) => {
       setEditorContent(editor.getHTML());
     },
@@ -40,42 +64,104 @@ export default function WriteBlog() {
   const addImage = useCallback(
     async (e) => {
       const selectedFile = e.target.files[0];
-      // upload file to firebase
-      const fileFormat = new Date().getTime() + selectedFile.name + "_";
-      const folderName = "write_blog/";
-      const fileUrl = await firebase.uploadFileAsync(
-        folderName,
-        selectedFile,
-        fileFormat,
-        2
-      );
-      if (fileUrl) {
-        if (editor) {
+      try {
+        const fileUrl = await uploadImage(selectedFile);
+        if (fileUrl && editor) {
           editor.chain().focus().setImage({ src: fileUrl }).run();
           setMedia(fileUrl);
         }
+      } catch (error) {
+        console.error("Error uploading image:", error);
       }
     },
     [editor]
   );
 
+  const handleImageClick = (e) => {
+    e.preventDefault();
+    fileInputRef.current.click();
+  };
+
+  const handleSubmit = async (e) => {
+    console.log("handleSubmit called");
+    e.preventDefault();
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const slug = title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+      const postData = {
+        title,
+        slug,
+        desc,
+        content: editorContent,
+        img: media,
+      };
+      console.log("Sending post data:", postData);
+      const response = await axios.post(
+        "http://localhost:8000/api/v1/posts",
+        postData
+      );
+      console.log("Server Response:", response.data);
+      if (response.status === 201) {
+        // Reset form fields and state
+        setTitle("");
+        setDesc("");
+        setEditorContent("");
+        setMedia("");
+        if (editor) {
+          editor.commands.clearContent();
+        }
+        navigate("/");
+        console.log("Post created successfully!");
+      }
+    } catch (error) {
+      console.error("Error submitting blog:", error.response || error);
+      setError("Failed to publish blog. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="flex flex-col items-center justify-center min-h-screen px-4 py-12">
       <div className="flex flex-col w-[740px] md:w-[560px]">
-        <div className="flex flex-row justify-between">
-          <h1 className="text-2xl font-bold mb-4">Write Blog</h1>
+        <div className="flex flex-row justify-between items-center mb-6">
+          <div className="flex items-center gap-4">
+            <BackButton />
+            <h1 className="text-2xl font-bold">
+              {isEdit ? "Modifier" : "Écrire"} un article
+            </h1>
+          </div>
+          {/* back button to cancel edit */}
+          {isEdit && (
+            <button
+              onClick={onClickEdit}
+              className="bg-gray-300 border rounded-md p-3 shadow-sm hover:shadow-lg hover:bg-gray-400 transition"
+              aria-label="Annuler la modification"
+            >
+              <IoIosCloseCircleOutline className="h-4 w-4" />
+            </button>
+          )}
         </div>
+
         {/* Form */}
-        <form action="" className="flex flex-col space-y-4">
+        <form onSubmit={handleSubmit} className="flex flex-col space-y-4">
           <input
             className="py-4 h-[60px] text-4xl border-none outline-none bg-transparent placeholder:text-[#b3b3b1]"
             type="text"
             placeholder="Title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
           />
           <input
             className="py-4 h-[60px] text-xl border-none outline-none bg-transparent placeholder:text-[#b3b3b1]"
             type="text"
             placeholder="Description"
+            value={desc}
+            onChange={(e) => setDesc(e.target.value)}
           />
           {/* Button group options */}
           <div className="flex flex-row gap-x-3">
@@ -130,10 +216,8 @@ export default function WriteBlog() {
             {/* upload image button */}
             <div>
               <button
-                onClick={() => {
-                  e.preventDefault();
-                  fileInputRef.current.click();
-                }}
+                type="button"
+                onClick={handleImageClick}
                 className="px-3 text-white bg-[#b3b3b1]"
               >
                 Image
@@ -147,20 +231,14 @@ export default function WriteBlog() {
               />
             </div>
           </div>
-          <EditorContent
-            editor={editor}
-            className="min-h-[300px] border rounded p-4"
-          />
+          <EditorContent editor={editor} />
           <div className="text-left">
-            <button
-              className="px-5 py-2.5 bg-[#1a8917] text-white cursor-pointer hover:shadow-lg hover:scale-105 rounded"
-              type="submit"
-            >
-              Publish
+            <button type="submit" className="px-5 py-2.5 bg-[#1a8917] text-white cursor-pointer hover:shadow-lg hover:scale-105 rounded disabled:opacity-50">
+              {isEdit ? "Update" : "Publish"}
             </button>
           </div>
-        </form>
-      </div>
-    </div>
+        </form >
+      </div >
+    </div >
   );
 }

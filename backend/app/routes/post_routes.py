@@ -1,8 +1,12 @@
 from fastapi import APIRouter, HTTPException # type: ignore
 from app.models.post import Post, PostUpdate
-from app.config import db
+from app.config.config import db
 from uuid import uuid4
+import logging
 
+# Configuration du logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -20,26 +24,37 @@ def post_helper(post) -> dict:
 
 # Create Post
 @router.post("/", response_description="Add new post")
-async def create_post(post:Post):
-    post_dict = post.dict(by_alias=True)
-    post_dict["_id"] = str(uuid4()) #generate random uuid for id
-    result = await db.posts.insert_one(post_dict)
-    new_post = await db.posts.find_one({"_id": result.inserted_id})
-    return {"status":201, "result": post_helper(new_post)}
+async def create_post(post: Post):
+    try:
+        logger.info(f"Received post data: {post.dict()}")
+        post_dict = post.dict(by_alias=True)
+        post_dict["_id"] = str(uuid4())
+        result = await db.posts.insert_one(post_dict)
+        logger.info(f"Inserted post with ID: {result.inserted_id}")
+        new_post = await db.posts.find_one({"_id": result.inserted_id})
+        return {"status": 201, "result": post_helper(new_post)}
+    except Exception as e:
+        logger.error(f"Error creating post: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # Read All Posts
 @router.get("/", response_description="List all posts")
 async def list_post():
-    posts = await db.posts.find().to_list(100)
-    return {"status":201, "result": [post_helper(post) for post in posts]}
+    try:
+        posts = await db.posts.find().to_list(100)
+        logger.info(f"Found {len(posts)} posts")
+        return {"status": 200, "result": [post_helper(post) for post in posts]}
+    except Exception as e:
+        logger.error(f"Error fetching posts: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # Read Single Post by Id
 @router.get("/{id}", response_description="Get a single post")
 async def read_post(id: str):
     if(post := await db.posts.find_one({"_id":id})) is not None:
-        return {"status": 200, "result": post_helper(post)}
+        return {"status": 200, "result": [post_helper(post)]}
     raise HTTPException(status_code=404, detail=f"Post {id} not found")
 
 
