@@ -1,8 +1,15 @@
-from fastapi import APIRouter, HTTPException # type: ignore
-from app.models.post import Post, PostUpdate
-from app.config.config import db
-from uuid import uuid4
+from fastapi import APIRouter, HTTPException, Depends, Query
+from typing import List, Optional
 import logging
+
+from ..models.post import PostCreate, PostUpdate, PostResponse
+from ..services.post_service import post_service
+from ..middleware.auth import (
+    get_current_user,
+    require_author_or_admin,
+    get_optional_user
+)
+
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO)
@@ -10,32 +17,28 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Helper to convert MongoDB ObjectId to string
-def post_helper(post) -> dict:
-    return {
-        "id": str(post["_id"]),
-        "created_at": str(post["created_at"]),
-        "slug": str(post["slug"]),
-        "title": str(post["title"]),
-        "desc": str(post["desc"]),
-        "content": str(post["content"]),
-        "img": str(post["img"]),
-    }
-
 # Create Post
-@router.post("/", response_description="Add new post")
-async def create_post(post: Post):
+@router.post("/", response_model=PostResponse, status_code=201)
+async def create_post(
+    post_data: PostCreate, 
+    current_user: dict = Depends(require_author_or_admin)
+):
+    """Crée un nouveau post (authentification requise)"""
     try:
-        logger.info(f"Received post data: {post.dict()}")
-        post_dict = post.dict(by_alias=True)
-        post_dict["_id"] = str(uuid4())
-        result = await db.posts.insert_one(post_dict)
-        logger.info(f"Inserted post with ID: {result.inserted_id}")
-        new_post = await db.posts.find_one({"_id": result.inserted_id})
-        return {"status": 201, "result": post_helper(new_post)}
+        logger.info(f"Création post par utilisateur: {current_user['clerk_id']}")
+        new_post = await post_service.create_post(
+            post_data=post_data,
+            author_id=current_user["clerk_id"]
+        )
+        logger.info(f"Post créé avec succès: {new_post.id}")
+        return new_post
+    
+    except ValueError as e:
+        logger.error(f"Erreur validation: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error creating post: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Erreur création post: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erreur interne au serveur")
 
 
 # Read All Posts
