@@ -41,13 +41,29 @@ async def create_post(
         raise HTTPException(status_code=500, detail="Erreur interne au serveur")
 
 
-# Read All Posts
-@router.get("/", response_description="List all posts")
-async def list_post():
+@router.get("/", response_model=List[PostResponse])
+async def list_post(
+    skip: int = Query(0, ge=0, description="Nombre de posts à ignorer"),
+    limit: int = Query(10, ge=1, le=100, description="Nombre maximum de posts"),
+    published_only: bool = Query(True, decription="Afficher seulement les posts publiés"),
+    author_id: Optional[str] = Query(None, description="Filterer par auteur"),
+    current_user: Optional[dict] = Depends(get_optional_user)
+):
+    """Liste tous les posts avec pagination et filtres"""
     try:
-        posts = await db.posts.find().to_list(100)
-        logger.info(f"Found {len(posts)} posts")
-        return {"status": 200, "result": [post_helper(post) for post in posts]}
+        # Si utilisateur connecté et demande ses propres posts
+        if current_user and not author_id:
+            # Peut voir ses brouillons
+            published_only = False
+            author_id = current_user["clerk_id"]
+
+        post = await post_service.get_posts(
+            skip=skip,
+            limit=limit,
+            published_only=published_only,
+            author_id=author_id
+        )
+        logger.info(f"Récupération de {len(posts) posts}")
     except Exception as e:
         logger.error(f"Error fetching posts: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
