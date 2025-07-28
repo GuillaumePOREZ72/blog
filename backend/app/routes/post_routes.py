@@ -15,7 +15,7 @@ from ..middleware.auth import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/posts", tags=["posts"])
 
 # Create Post
 @router.post("/", response_model=PostResponse, status_code=201)
@@ -42,11 +42,11 @@ async def create_post(
 
 
 @router.get("/", response_model=List[PostResponse])
-async def list_post(
+async def list_posts(
     skip: int = Query(0, ge=0, description="Nombre de posts à ignorer"),
     limit: int = Query(10, ge=1, le=100, description="Nombre maximum de posts"),
-    published_only: bool = Query(True, decription="Afficher seulement les posts publiés"),
-    author_id: Optional[str] = Query(None, description="Filterer par auteur"),
+    published_only: bool = Query(True, description="Afficher seulement les posts publiés"),
+    author_id: Optional[str] = Query(None, description="Filtrer par auteur"),
     current_user: Optional[dict] = Depends(get_optional_user)
 ):
     """Liste tous les posts avec pagination et filtres"""
@@ -57,47 +57,151 @@ async def list_post(
             published_only = False
             author_id = current_user["clerk_id"]
 
-        post = await post_service.get_posts(
+        posts = await post_service.get_posts(
             skip=skip,
             limit=limit,
             published_only=published_only,
             author_id=author_id
         )
-        logger.info(f"Récupération de {len(posts) posts}")
+        logger.info(f"Récupération de {len(posts)} posts")
+        return posts
+    
     except Exception as e:
-        logger.error(f"Error fetching posts: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Erreur récupération posts: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erreur interne du serveur")
 
 
-# Read Single Post by Id
-@router.get("/{id}", response_description="Get a single post")
-async def read_post(id: str):
-    if(post := await db.posts.find_one({"_id":id})) is not None:
-        return {"status": 200, "result": [post_helper(post)]}
-    raise HTTPException(status_code=404, detail=f"Post {id} not found")
+@router.get("/slug/{slug}", response_model=PostResponse)
+async def get_post_by_slug(
+    slug: str,
+    current_user: Optional[dict] = Depends(get_optional_user)
+):
+    """Récupère un post par son slug"""
+    try:
+        post = await post_service.get_post_by_slug(slug)
+
+        if not post:
+            raise HTTPException(status_code=404, detail="Post non trouvé")
+
+        # Vérifier si le post est publié ou si l'utilisateur est l'auteur
+        if not post.is_published:
+            if not current_user or current_user["clerk_id"] != post.author_id:
+                raise HTTPException(status_code=404, detail="Post non trouvé")
+
+        logger.info(f"Post récupéré: {post.slug}")
+        return post
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur récupération post: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erreur interne du serveur")
 
 
-# Update Post
-@router.put("/{id}", response_description="Update a post")
-async def update_post(id:str, post: PostUpdate):
-    post_dict = {k: v for k, v in post.dict(by_alias=True).items() if v is not None}
-    if len(post_dict) >= 1:
-        update_result = await db.posts.update_one(
-            {"_id": id}, {"$set": post_dict}
+@router.get("/{post_id}", response_model=PostResponse)
+async def get_post_by_id(
+    post_id: str,
+    current_user: Optional[dict] = Depends(get_optional_user)
+):
+    """Récupère un post par son ID"""
+    try:
+        post = await post_service.get_post_by_id(post_id)
+
+        if not post:
+            raise HTTPException(status_code=404, detail="Post non trouvé")
+
+        # Vérifier les permissions pour les brouillons
+        if not post.is_published:
+            if not current_user or current_user["clerk_id"] != post.author_id:
+                raise HTTPException(status_code=404, detail="Post non trouvé")
+
+        logger.info(f"Post récupéré: {post_id}")
+        return post
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur récupération post: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erreur interne du serveur")
+
+
+@router.put("/{post_id}", response_model=PostResponse)
+async def update_post(
+    post_id: str, 
+    post_update: PostUpdate,
+    current_user: dict = Depends(require_author_or_admin)
+):
+    """Met à jour un post (seul l'auteur peut modifier)"""
+    try:
+        updated_post = await post_service.update_post(
+            post_id=post_id,
+            post_update=post_update,
+            author_id=current_user["clerk_id"]
         )
-        if update_result.modified_count == 1:
-            if(updated_post := await db.posts.find_one({"_id": id})) is not None:
-                return {"status":200, "result": post_helper(updated_post)}
-    if (existing_post := await db.posts.find_one({"_id": id})) is not None:
-        return {"status":200, "result": post_helper(existing_post)}
-    raise HTTPException(status_code=404, detail=f"Post {id} not found")
+
+        if not updated_post:
+            raise HTTPException(
+                status_code=404,
+                detail="Post non trouvé ou non autorisé"
+            )
+
+        logger.info(f"Post mis à jour: {post_id}")
+        return updated_post
+
+    except ValueError as e:
+        logger.error(f"Erreur validation: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur mise à jour post: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erreur interne du serveur")
 
 
-# Delete Post
-@router.delete("/{id}", response_description="Delete a post")
-async def delete_post(id:str):
-    delete_result = await db.posts.delete_one({"_id": id})
-    if delete_result.deleted_count == 1:
-        return {"status":200, "result": f"Post {id} deleted"}
-    raise HTTPException(status_code=404, detail=f"Post {id} not found")
+@router.delete("/{post_id}", status_code=204)
+async def delete_post(
+    post_id: str,
+    current_user: dict = Depends(require_author_or_admin)
+):
+    """Supprime un post (seul l'auteur peut supprimer)"""
+    try:
+        deleted = await post_service.delete_post(
+            post_id=post_id,
+            author_id=current_user["clerk_id"]
+        )
 
+        if not deleted:
+            raise HTTPException(
+                status_code=404,
+                detail="Post non trouvé ou non autorisé"
+            )
+
+        logger.info(f"Post supprimé: {post_id}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur suppression post: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erreur interne du serveur")
+
+
+@router.get("/tags/{tag}", response_model=List[PostResponse])
+async def get_posts_by_tag(
+    tag: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100)
+):
+    """Récupère les posts par tag"""
+    try:
+        posts = await post_service.get_posts_by_tag(
+            tag=tag,
+            skip=skip,
+            limit=limit
+        )
+
+        logger.info(f"Récupération posts tag '{tag}': {len(posts)} trouvés")
+        return posts
+
+    except Exception as e:
+        logger.error(f"Erreur récupération posts par tag: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erreur interne du serveur")
