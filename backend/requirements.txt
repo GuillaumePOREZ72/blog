@@ -1,0 +1,39 @@
+# Framework FastAPI et serveur ASGI
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# Base de données MongoDB (async)
+motor==3.3.2
+pymongo==4.6.0
+
+# Modèles de données et validation
+pydantic==2.5.0
+pydantic[email]==2.5.0
+
+# Authentification et sécurité
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+
+# Client HTTP pour appels API Clerk
+httpx==0.25.2
+
+# Gestion des images Cloudinary
+cloudinary==1.36.0
+
+# Gestion des variables d'environnement
+python-dotenv==1.0.0
+
+# Gestion des dates et heures
+python-dateutil==2.8.2
+
+# Logging et monitoring
+structlog==23.2.0
+
+# Utilitaires
+typing-extensions==4.8.0
+email-validator==2.1.0
+
+# Développement et tests (optionnel)
+pytest==7.4.3
+pytest-asyncio==0.21.1
