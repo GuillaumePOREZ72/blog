@@ -1,4 +1,3 @@
-# ✅ CHARGER .ENV EN TOUT PREMIER
 import os
 from dotenv import load_dotenv
 
@@ -27,7 +26,7 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("🚀 Starting up application Blog API")
     
-    # ✅ Vérification des variables d'environnement
+    # Vérification des variables d'environnement
     mongodb_url = os.getenv("MONGODB_URL")
     if not mongodb_url:
         logger.error("❌ MONGODB_URL not found in environment variables")
@@ -55,10 +54,39 @@ async def lifespan(app: FastAPI):
 
 # Création de l'application FastAPI
 app = FastAPI(
-    title="Blog API",
-    description="API pour un blog avec authentification Clerk et gestion d'images Cloudinary",
+    title="🚀 Blog API",
+    description="""
+    ## API complète pour un blog moderne
+    
+    ### 🔐 Authentification
+    Pour tester les endpoints protégés :
+    1. Cliquez sur **"Authorize"** 🔓
+    2. Entrez : `Bearer test_postman_token`
+    3. Cliquez sur **"Authorize"**
+    
+    ### 📝 Fonctionnalités
+    - **Users** : Gestion des utilisateurs avec Clerk
+    - **Posts** : CRUD complet des articles
+    - **Images** : Upload et gestion via Cloudinary
+    
+    ### 🧪 Mode Test
+    Utilisez le token `test_postman_token` pour vos tests en développement.
+    
+    ### 📚 Collections disponibles
+    - **Users** : Création, lecture, mise à jour
+    - **Posts** : Blog posts avec tags et images  
+    - **Images** : Upload Cloudinary avec transformations
+    """,
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    # Configuration de l'authentification dans Swagger
+    swagger_ui_parameters={
+        "tryItOutEnabled": True,
+        "persistAuthorization": True,  # Garde l'auth entre les tests
+        "displayRequestDuration": True,
+        "filter": True,
+        "syntaxHighlight.theme": "arta"
+    }
 )
 
 # Configuration CORS
@@ -77,9 +105,9 @@ app.add_middleware(
 async def root():
     """Route racine"""
     return {
-        "message": "Blog API is running",
+        "message": "🚀 Blog API is running",
         "version": "1.0.0",
-        "docs": "/docs",
+        "docs": "📚 /docs",
         "environment": {
             "mongodb_configured": bool(os.getenv("MONGODB_URL")),
             "clerk_configured": bool(os.getenv("CLERK_SECRET_KEY")),
@@ -87,7 +115,7 @@ async def root():
         }
     }
 
-@app.get("/health")
+@app.get("/health", tags=["🏠 Base"])
 async def health_check():
     """Vérification de la santé de l'API"""
     try:
