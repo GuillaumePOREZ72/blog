@@ -18,6 +18,36 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
+@router.post("/", response_model=UserResponse, status_code=201)
+async def create_user(user_data: UserCreate):
+    """Créer un nouvel utilisateur"""
+    try:
+        logger.info(f"Tentative de création utilisateur: {user_data.clerk_id}")
+
+        # Vérifier si l'utilisateur existe déjà
+        existing_user = await user_service.get_user_by_clerk_id(user_data.clerk_id)
+        if existing_user:
+            logger.warning(f"Utilisateur déjà existant: {user_data.clerk_id}")
+            raise HTTPException(
+                status_code=409,
+                detail=f"Utilisateur avec clerk_id {user_data.clerk_id} existe déjà."
+            )
+
+        # Créer l'utilisateur
+        new_user = await user_service.create_user(user_data)
+        logger.info(f"Utilisateur créé avec succès: {new_user.id}")
+        return new_user
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.error(f"❌ Erreur de validation: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Erreur serveur lors création: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erreur serveur: {str(e)}")
+
+        
 @router.post("/webhook", status_code=200)
 async def clerk_webhook(request: Request):
     """Webhook Clerk pour synchroniser les utilisateurs"""
@@ -41,6 +71,8 @@ async def clerk_webhook(request: Request):
         
         event_type = event_data.get("type")
         user_data = event_data.get("data")
+
+        logger.info(f"🔔 Webhook reçu: {event_type}")
         
         if event_type == "user.created":
             # Créer l'utilisateur en base
@@ -53,8 +85,13 @@ async def clerk_webhook(request: Request):
                 profile_image=user_data.get("profile_image_url")
             )
             
-            new_user = await user_service.create_user(user_create)
-            logger.info(f"Utilisateur créé via webhook: {new_user.clerk_id}")
+            # Vérifier si l'utilisateur existe déjà
+            existing_user = await user_service.get_user_by_clerk_id(user_data["id"])
+            if not existing_user:
+                new_user = await user_service.create_user(user_create)
+                logger.info(f"✅ Utilisateur créé via webhook: {new_user.clerk_id}")
+            else:
+                logger.info(f"ℹ️ Utilisateur déjà existant via webhook: {user_data['id']}")
             
         elif event_type == "user.updated":
             # Mettre à jour l'utilisateur
@@ -67,21 +104,21 @@ async def clerk_webhook(request: Request):
             
             updated_user = await user_service.update_user(user_data["id"], user_update)
             if updated_user:
-                logger.info(f"Utilisateur mis à jour via webhook: {updated_user.clerk_id}")
+                logger.info(f"✅ Utilisateur mis à jour via webhook: {updated_user.clerk_id}")
             
         elif event_type == "user.deleted":
             # Désactiver l'utilisateur (soft delete)
             deactivated = await user_service.deactivate_user(user_data["id"])
             if deactivated:
-                logger.info(f"Utilisateur désactivé via webhook: {user_data['id']}")
+                logger.info(f"✅ Utilisateur désactivé via webhook: {user_data['id']}")
         
-        return {"status": "success"}
+        return {"status": "success", "event_type": event_type}
         
     except json.JSONDecodeError:
-        logger.error("Erreur parsing JSON webhook")
+        logger.error("❌ Erreur parsing JSON webhook")
         raise HTTPException(status_code=400, detail="JSON invalide")
     except Exception as e:
-        logger.error(f"Erreur webhook Clerk: {str(e)}")
+        logger.error(f"❌ Erreur webhook Clerk: {str(e)}")
         raise HTTPException(status_code=500, detail="Erreur interne du serveur")
 
 @router.get("/me", response_model=UserResponse)
@@ -90,6 +127,8 @@ async def get_current_user_profile(
 ):
     """Récupère le profil de l'utilisateur connecté"""
     try:
+        logger.info(f"🔍 Récupération profil pour: {current_user.get('clerk_id')}")
+        
         user = await user_service.get_user_by_clerk_id(current_user["clerk_id"])
         
         if not user:
@@ -103,16 +142,16 @@ async def get_current_user_profile(
                 profile_image=current_user.get("profile_image")
             )
             user = await user_service.create_user(user_create)
-            logger.info(f"Utilisateur créé automatiquement: {user.clerk_id}")
+            logger.info(f"✅ Utilisateur créé automatiquement: {user.clerk_id}")
         
         # Mettre à jour la dernière connexion
         await user_service.update_last_login(current_user["clerk_id"])
         
-        logger.info(f"Profil récupéré pour: {user.clerk_id}")
+        logger.info(f"✅ Profil récupéré pour: {user.clerk_id}")
         return user
         
     except Exception as e:
-        logger.error(f"Erreur récupération profil: {str(e)}")
+        logger.error(f"❌ Erreur récupération profil: {str(e)}")
         raise HTTPException(status_code=500, detail="Erreur interne du serveur")
 
 @router.put("/me", response_model=UserResponse)
@@ -122,6 +161,8 @@ async def update_current_user_profile(
 ):
     """Met à jour le profil de l'utilisateur connecté"""
     try:
+        logger.info(f"🔄 Mise à jour profil pour: {current_user.get('clerk_id')}")
+        
         updated_user = await user_service.update_user(
             clerk_id=current_user["clerk_id"],
             user_update=user_update
@@ -130,14 +171,14 @@ async def update_current_user_profile(
         if not updated_user:
             raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
         
-        logger.info(f"Profil mis à jour pour: {updated_user.clerk_id}")
+        logger.info(f"✅ Profil mis à jour pour: {updated_user.clerk_id}")
         return updated_user
         
     except ValueError as e:
-        logger.error(f"Erreur validation: {str(e)}")
+        logger.error(f"❌ Erreur validation: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Erreur mise à jour profil: {str(e)}")
+        logger.error(f"❌ Erreur mise à jour profil: {str(e)}")
         raise HTTPException(status_code=500, detail="Erreur interne du serveur")
 
 @router.get("/", response_model=List[UserResponse])
@@ -149,11 +190,11 @@ async def list_users(
     """Liste tous les utilisateurs (admin uniquement)"""
     try:
         users = await user_service.get_all_users(skip=skip, limit=limit)
-        logger.info(f"Liste utilisateurs récupérée: {len(users)} utilisateurs")
+        logger.info(f"✅ Liste utilisateurs récupérée: {len(users)} utilisateurs")
         return users
         
     except Exception as e:
-        logger.error(f"Erreur récupération utilisateurs: {str(e)}")
+        logger.error(f"❌ Erreur récupération utilisateurs: {str(e)}")
         raise HTTPException(status_code=500, detail="Erreur interne du serveur")
 
 @router.get("/{user_id}", response_model=UserResponse)
@@ -168,13 +209,13 @@ async def get_user_by_id(
         if not user:
             raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
         
-        logger.info(f"Utilisateur récupéré: {user_id}")
+        logger.info(f"✅ Utilisateur récupéré: {user_id}")
         return user
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Erreur récupération utilisateur: {str(e)}")
+        logger.error(f"❌ Erreur récupération utilisateur: {str(e)}")
         raise HTTPException(status_code=500, detail="Erreur interne du serveur")
 
 @router.put("/{user_id}", response_model=UserResponse)
@@ -185,6 +226,7 @@ async def update_user_by_admin(
 ):
     """Met à jour un utilisateur (admin uniquement)"""
     try:
+        logger.info(f"🔄 Mise à jour utilisateur par admin: {user_id}")
         # Récupérer l'utilisateur d'abord
         user = await user_service.get_user_by_id(user_id)
         if not user:
@@ -196,16 +238,16 @@ async def update_user_by_admin(
             user_update=user_update
         )
         
-        logger.info(f"Utilisateur mis à jour par admin: {user_id}")
+        logger.info(f"✅ Utilisateur mis à jour par admin: {user_id}")
         return updated_user
         
     except HTTPException:
         raise
     except ValueError as e:
-        logger.error(f"Erreur validation: {str(e)}")
+        logger.error(f"❌ Erreur validation: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Erreur mise à jour utilisateur: {str(e)}")
+        logger.error(f"❌ Erreur mise à jour utilisateur: {str(e)}")
         raise HTTPException(status_code=500, detail="Erreur interne du serveur")
 
 @router.delete("/{user_id}", status_code=204)
@@ -215,6 +257,7 @@ async def deactivate_user_by_admin(
 ):
     """Désactive un utilisateur (admin uniquement)"""
     try:
+        logger.info(f"🗑️ Désactivation utilisateur par admin: {user_id}")
         # Récupérer l'utilisateur d'abord
         user = await user_service.get_user_by_id(user_id)
         if not user:
@@ -226,12 +269,12 @@ async def deactivate_user_by_admin(
         if not deactivated:
             raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
         
-        logger.info(f"Utilisateur désactivé par admin: {user_id}")
+        logger.info(f"✅ Utilisateur désactivé par admin: {user_id}")
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Erreur désactivation utilisateur: {str(e)}")
+        logger.error(f"❌ Erreur désactivation utilisateur: {str(e)}")
         raise HTTPException(status_code=500, detail="Erreur interne du serveur")
 
 @router.post("/login", status_code=200)
@@ -249,12 +292,12 @@ async def track_user_login(
         updated = await user_service.update_last_login(login_data.clerk_id)
         
         if updated:
-            logger.info(f"Connexion tracée pour: {login_data.clerk_id}")
+            logger.info(f"✅ Connexion tracée pour: {login_data.clerk_id}")
         
         return {"status": "success", "message": "Connexion tracée"}
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Erreur trace connexion: {str(e)}")
+        logger.error(f"❌ Erreur trace connexion: {str(e)}")
         raise HTTPException(status_code=500, detail="Erreur interne du serveur")

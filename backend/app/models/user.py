@@ -21,7 +21,7 @@ class User(BaseModel):
         }
     )
     
-    id: Optional[str] = Field(None, alias="_id")  # ✅ String au lieu de PyObjectId
+    id: Optional[str] = Field(None, alias="_id") 
     clerk_id: str = Field(..., description="ID unique Clerk", min_length=10)
     email: str = Field(..., min_length=3, max_length=254)
     username: Optional[str] = Field(None, min_length=3, max_length=50)
@@ -136,14 +136,14 @@ class UserResponse(BaseModel):
     id: str = Field(alias="_id")
     clerk_id: str
     email: str
-    username: Optional[str]
-    first_name: Optional[str]
-    last_name: Optional[str]
-    profile_image: Optional[str]
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    profile_image: Optional[str] = None
     role: str
     is_active: bool
     created_at: datetime
-    last_login: Optional[datetime]
+    last_login: Optional[datetime] = None
 
 class UserLogin(BaseModel):
     """Modèle pour tracer les connexions"""

@@ -36,6 +36,7 @@ class UserService:
             user_dict["updated_at"] = datetime.utcnow()
             user_dict["is_active"] = True
             user_dict["role"] = "user" # rôle par défaut
+            user_dict["last_login"] = None
 
             result = await self.collection.insert_one(user_dict)
 
@@ -74,7 +75,7 @@ class UserService:
     async def update_user(self, clerk_id: str, user_update: UserUpdate) -> Optional[UserResponse]:
         """Met à jour un utilisateur"""
         try:
-            update_data = {k: v for k, v in user_update.model_dump().items() if v is not None}  # ✅ model_dump()
+            update_data = {k: v for k, v in user_update.model_dump().items() if v is not None}
             
             if not update_data:
                 # Rien à mettre à jour
@@ -106,7 +107,6 @@ class UserService:
             logger.error(f"Error updating last login: {str(e)}")
             return False
     
-    
     async def deactivate_user(self, clerk_id: str) -> bool:
         """Désactive un utilisateur"""
         try:
@@ -135,10 +135,25 @@ class UserService:
             return None
         
         try:
-            user_doc["id"] = str(user_doc["_id"])
-            return UserResponse(**user_doc)
+            converted_doc = {
+                "id": str(user_doc["_id"]),  # Conversion ObjectId → string
+                "clerk_id": user_doc["clerk_id"],
+                "email": user_doc["email"],
+                "username": user_doc.get("username"),
+                "first_name": user_doc.get("first_name"),
+                "last_name": user_doc.get("last_name"),
+                "profile_image": user_doc.get("profile_image"),
+                "role": user_doc.get("role", "user"),
+                "is_active": user_doc.get("is_active", True),
+                "created_at": user_doc.get("created_at", datetime.utcnow()),
+                "last_login": user_doc.get("last_login")
+            }
+            
+            return UserResponse(**converted_doc)
+        
         except Exception as e:
             logger.error(f"Error converting user document: {str(e)}")
+            logger.error(f"Document content: {user_doc}")
             return None
 
 # Instance globale
