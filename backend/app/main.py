@@ -1,10 +1,15 @@
-from fastapi import FastAPI, Request
+# ✅ CHARGER .ENV EN TOUT PREMIER
+import os
+from dotenv import load_dotenv
+
+# Chargement immédiat des variables d'environnement
+load_dotenv()
+
+# Puis imports FastAPI et services
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import logging
-import os
-from typing import AsyncGenerator
 
 from .services.database import database
 from .routes import post_routes, user_routes, image_routes
@@ -12,135 +17,107 @@ from .routes import post_routes, user_routes, image_routes
 # Configuration du logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator:
+async def lifespan(app: FastAPI):
     """Gestionnaire de cycle de vie de l'application"""
-    #Startup
-    logger.info("🚀 Démarrage de l'application Blog API")
-
-    try:
-        # Connexion à MongoDB
-        await database.connect_to_mongo()
-        logger.info("✅ Base de données connectée")
-
-        yield
-
-    except Exception as e:
-        logger.error(f"❌ Erreur lors du démarrage: {e}")
-        raise
-    finally:
-        logger.info("🛑 Arrêt de l'application")
-        await database.close_mongo_connection()
-        logger.info("✅ Connexions fermées proprement")
+    # Startup
+    logger.info("🚀 Starting up application Blog API")
+    
+    # ✅ Vérification des variables d'environnement
+    mongodb_url = os.getenv("MONGODB_URL")
+    if not mongodb_url:
+        logger.error("❌ MONGODB_URL not found in environment variables")
+        raise Exception("MONGODB_URL environment variable is required")
+    
+    logger.info(f"📊 Environment check:")
+    logger.info(f"  - MONGODB_URL: {'✓' if mongodb_url else '✗'}")
+    logger.info(f"  - CLERK_SECRET_KEY: {'✓' if os.getenv('CLERK_SECRET_KEY') else '✗'}")
+    logger.info(f"  - CLOUDINARY_CLOUD_NAME: {'✓' if os.getenv('CLOUDINARY_CLOUD_NAME') else '✗'}")
+    
+    # Test de connexion à la base de données
+    connection_success = await database.connect_to_mongo()
+    if not connection_success:
+        logger.error("❌ Failed to connect to database during startup")
+        raise Exception("Database connection failed")
+    
+    logger.info("✅ Application startup complete")
+    
+    yield
+    
+    # Shutdown
+    logger.info("🔒 Shutting down application...")
+    await database.close_mongo_connection()
+    logger.info("✅ Application shutdown complete")
 
 # Création de l'application FastAPI
 app = FastAPI(
     title="Blog API",
-    description="API REST pour application de blog avec authentification Clerk",
+    description="API pour un blog avec authentification Clerk et gestion d'images Cloudinary",
     version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
     lifespan=lifespan
 )
 
 # Configuration CORS
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(","),
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
-# Middleware de gestion d'erreurs globales
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Gestionnaire d'erreurs global"""
-    logger.error(f"Erreur non gérée: {str(exc)}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={
-            "detail": "Erreur interne du serveur",
-            "type": "internal_server_error"
+# Routes de base
+@app.get("/")
+async def root():
+    """Route racine"""
+    return {
+        "message": "Blog API is running",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "environment": {
+            "mongodb_configured": bool(os.getenv("MONGODB_URL")),
+            "clerk_configured": bool(os.getenv("CLERK_SECRET_KEY")),
+            "cloudinary_configured": bool(os.getenv("CLOUDINARY_CLOUD_NAME"))
         }
-    )
+    }
 
-# Middleware de logging des requêtes
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """Log toutes les requêtes HTTP"""
-    start_time = time.time()
-
-    response = await call_next(request)
-
-    process_time = time.time() - start_time
-    logger.info(
-        f"{request.method} {request.url.path} - "
-        f"Status: {response.status_code} - "
-        f"Time: {process_time:.3f}s"
-    )
-
-    return response
-
-# Route de santé
-@app.get("/health", tags=["Health"])
+@app.get("/health")
 async def health_check():
-    """Endpoint de vérification de santé"""
+    """Vérification de la santé de l'API"""
     try:
-        #Vérifier la connexion MongoDB
-        db = database.get_database()
-        await db.command('ping')
-
+        db_health = await database.health_check()
+        
         return {
             "status": "healthy",
-            "message": "Blog API opérationnelle",
-            "database": "connected",
-            "version": "1.0.0"
+            "api": "running",
+            "database": db_health,
+            "environment": {
+                "mongodb_configured": bool(os.getenv("MONGODB_URL")),
+                "clerk_configured": bool(os.getenv("CLERK_SECRET_KEY")),
+                "cloudinary_configured": bool(os.getenv("CLOUDINARY_CLOUD_NAME"))
+            }
         }
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return JSONResponse(
-            status_code=503,
-            content={
-                "status": "unhealthy",
-                "message": "Service indisponible",
-                "database": "disconnected",
-                "error": str(e)
-            }
-        )
-
-# Route racine
-@app.get("/", tags=["Root"])
-async def root():
-    """Endpoint racine de l'API"""
-    return {
-        "message": "Bienvenue sur l'API Blog",
-        "version": "1.0.0",
-        "documentation": "/docs",
-        "health": "/health"
-    }
+        logger.error(f"Health check failed: {str(e)}")
+        raise HTTPException(status_code=503, detail="Service unhealthy")
 
 # Inclusion des routers
 app.include_router(post_routes.router, prefix="/api/v1")
 app.include_router(user_routes.router, prefix="/api/v1")
 app.include_router(image_routes.router, prefix="/api/v1")
 
-# Import nécessaire pour le middleware de timing
-import time
-
 if __name__ == "__main__":
     import uvicorn
-
-    # Configuration pour le développement
+    port = int(os.getenv("PORT", 8000))
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
+        port=port,
+        reload=True
     )
