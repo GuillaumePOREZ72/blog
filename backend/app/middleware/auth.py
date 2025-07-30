@@ -20,13 +20,13 @@ async def get_current_user(
         if os.getenv("ENV") == "development" and token.startswith("test_"):
             logger.info("🧪 Using test token for development")
             return {
-                "clerk_id": "user_swagger_test_123",  # ✅ Correspond à l'utilisateur créé
+                "clerk_id": "user_swagger_test_123",
                 "email": "swagger@test.com",
                 "username": "swaggeruser",
                 "first_name": "Swagger",
                 "last_name": "Tester",
                 "profile_image": "https://images.clerk.dev/swagger.jpg",
-                "role": "author",  # ✅ Rôle pour créer des posts
+                "role": "admin",  # ✅ Rôle pour créer des posts
                 "is_active": True
             }
         

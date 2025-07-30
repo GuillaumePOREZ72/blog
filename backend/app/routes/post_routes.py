@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Path
 from typing import List, Optional
+from bson import ObjectId
 from ..services.post_service import post_service
 from ..models.post import PostCreate, PostUpdate, PostResponse
 from ..middleware.auth import get_current_user, require_author_or_admin, get_optional_user
@@ -176,16 +177,27 @@ async def update_post(
 
 
 @router.delete("/{post_id}", status_code=204)
-async def delete_post(
-    post_id: str,
+async def delete_post_by_id(
+    post_id: str = Path(
+        ...,
+        description="ID MongoDB du post (24 caractères hexadécimaux)",
+        example="6888a4ace2ff811da8dcfcbc"
+    ),
     current_user: dict = Depends(require_author_or_admin)
 ):
-    """🗑️ Supprimer un post"""
+    """🗑️ Supprimer un post par son ID"""
     try:
-        logger.info(f"🗑️ Suppression post: {post_id} par {current_user.get('clerk_id')}")
-        
-        # Vérifier que le post existe et que l'utilisateur a les droits
-        existing_post = await post_service.get_post_by_slug(post_id)
+        logger.info(f"🗑️ Suppression post ID: {post_id} par {current_user.get('clerk_id')}")
+
+        # Vérifier si c'est un ObjectId valide
+        if not ObjectId.is_valid(post_id):
+           raise HTTPException(
+                status_code=400, 
+                detail=f"ID MongoDB invalide: {post_id}. Utilisez un ObjectId valide (24 caractères hexadécimaux)"
+            )
+
+        # Vérifier que le post existe
+        existing_post = await post_service.get_post_by_id(post_id)
         if not existing_post:
             raise HTTPException(status_code=404, detail="Post non trouvé")
         
@@ -226,3 +238,35 @@ async def get_posts_by_tag(
     except Exception as e:
         logger.error(f"Erreur récupération posts par tag: {str(e)}")
         raise HTTPException(status_code=500, detail="Erreur interne du serveur")
+
+
+@router.delete("/slug/{slug}", status_code=204)
+async def delete_post_by_slug(
+    slug: str,
+    current_user: dict = Depends(require_author_or_admin)
+):
+    """🗑️ Supprimer un post par son slug"""
+    try:
+        logger.info(f"🗑️ Suppression post slug: {slug} par {current_user.get('clerk_id')}")
+        
+        # Vérifier que le post existe
+        existing_post = await post_service.get_post_by_slug(slug)
+        if not existing_post:
+            raise HTTPException(status_code=404, detail="Post non trouvé")
+        
+        # Vérifier les permissions (auteur ou admin)
+        if current_user["role"] != "admin" and current_user["clerk_id"] != existing_post.author_id:
+            raise HTTPException(status_code=403, detail="Accès refusé")
+        
+        # Supprimer le post
+        deleted = await post_service.delete_post(slug)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Post non trouvé")
+        
+        logger.info(f"✅ Post supprimé par slug: {slug}")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Erreur suppression post: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erreur serveur")

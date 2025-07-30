@@ -121,6 +121,30 @@ async def clerk_webhook(request: Request):
         logger.error(f"❌ Erreur webhook Clerk: {str(e)}")
         raise HTTPException(status_code=500, detail="Erreur interne du serveur")
 
+@router.get("/", response_model=List[UserResponse])
+async def list_users(
+    skip: int = Query(0, ge=0, description="Nombre d'utilisateurs à ignorer"),
+    limit: int = Query(50, ge=1, le=100, description="Nombre maximum d'utilisateurs"),
+    current_user: dict = Depends(require_admin)
+):
+    """
+    📋 Lister tous les utilisateurs
+    
+    - **Authentification requise** 🔐
+    - **Rôle admin requis** 👑
+    """
+    try:
+        logger.info(f"📋 Liste utilisateurs demandée par: {current_user.get('clerk_id')}")
+
+        users = await user_service.get_all_users(skip=skip, limit=limit)
+        logger.info(f"✅ {len(users)} utilisateurs récupérés")
+
+        return users
+
+    except Exception as e:
+        logger.error(f"❌ Erreur récupération utilisateurs: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erreur serveur")
+
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_profile(
     current_user: dict = Depends(get_current_user)
