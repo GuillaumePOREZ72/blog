@@ -149,33 +149,69 @@ async def list_user_images(
     """📋 Liste les images de l'utilisateur connecté"""
     try:
         user_id = current_user.get('clerk_id')
+        logger.info(f"🔍 Recherche images pour user_id: {user_id}")
         
-        # Recherche des images de l'utilisateur
-        result = cloudinary.Search() \
-            .expression(f"public_id:*{clerk_id}*") \
-            .sort_by([("created_at", "desc")]) \
-            .max_results(max_results) \
-            .execute()
+        # Vérification que user_id existe
+        if not user_id:
+            raise HTTPException(
+                status_code=400,
+                detail="ID utilisateur manquant"
+            )
+        
+        # Recherche avec gestion d'erreur
+        try:
+            # Le dosiier basé sur la structure d'upload
+            folder_prefix = f"blog/{user_id}"
+            logger.info(f"🔍 Recherche dans le dossier: {folder_prefix}")
+
+            result = cloudinary.api.resources(
+                type="upload",
+                prefix=folder_prefix,
+                max_results=max_results,
+                resource_type="image"
+            )
+
+            logger.info(f"🔍 API resources: {len(result.get('resources', []))} images trouvées")
+            
+        except Exception as api_error:
+            logger.error(f"❌ Erreur API Cloudinary: {str(api_error)}")
+            return {
+                "success": True,
+                "total_count": 0,
+                "images": [],
+                "user_id": user_id,
+                "message": "Aucune image trouvée"
+            }
         
         images = []
         for resource in result.get("resources", []):
-            images.append({
-                "public_id": resource["public_id"],
-                "secure_url": resource["secure_url"],
-                "width": resource["width"],
-                "height": resource["height"],
-                "format": resource["format"],
-                "bytes": resource["bytes"],
-                "created_at": resource["created_at"]
-            })
+            try:
+                images.append({
+                    "public_id": resource.get("public_id", ""),
+                    "secure_url": resource.get("secure_url", ""),
+                    "width": resource.get("width", 0),
+                    "height": resource.get("height", 0),
+                    "format": resource.get("format", "unknown"),
+                    "bytes": resource.get("bytes", 0),
+                    "created_at": resource.get("created_at", "")
+                })
+                logger.info(f"✅ Image ajoutée: {resource.get('public_id', '')}")
+            except Exception as format_error:
+                logger.warning(f"⚠️ Erreur formatage resource: {format_error}")
+                continue
+        
+        logger.info(f"✅ {len(images)} images formatées avec succès")
         
         return {
             "success": True,
-            "total_count": result.get("total_count", 0),
+            "total_count": len(images),
             "images": images,
-            "user_id": user_id
+            "user_id": user_id,
+            "folder_searched": folder_prefix
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"❌ Erreur liste images: {str(e)}")
         raise HTTPException(
