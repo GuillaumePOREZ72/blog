@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from .services.database import database
-from .routes import post_routes, user_routes, image_routes
+from .routes import post_routes, user_routes, image_routes, webhook_routes
 
 # Configuration du logging
 logging.basicConfig(
@@ -139,6 +139,7 @@ async def health_check():
 app.include_router(post_routes.router, prefix="/api/v1")
 app.include_router(user_routes.router, prefix="/api/v1")
 app.include_router(image_routes.router, prefix="/api/v1")
+app.include_router(webhook_routes.router, prefix="/api/v1")
 
 if __name__ == "__main__":
     import uvicorn
