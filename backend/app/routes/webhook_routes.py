@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, HTTPException
 import logging
 import json
 from datetime import datetime
+from ..services.database import get_database
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ async def handle_user_created(user_data: dict):
         # Trouver l'email primaire
         primary_email = None
         if primary_email_id:
-            for email_obj in email_addressess:
+            for email_obj in email_addresses:
                 if email_obj.get('id') == primary_email_id:
                     primary_email = email_obj.get('email_address')
                     break
@@ -82,13 +83,8 @@ async def handle_user_created(user_data: dict):
         print(f"🆕 NOUVEL UTILISATEUR CRÉÉ")
         print(f"🆔 ID: {user_id}")
         print(f"📧 Email: {primary_email}")
-        print(f"📧 Primary Email ID: {primary_email_id}")
-        print(f"📧 Tous les emails: {[e.get('email_address') for e in email_addresses]}")
-        print(f"👤 Nom: {user_data.get('first_name')} {user_data.get('last_name')}")
-        print(f"👤 Username: {user_data.get('username')}")
-        print(f"🖼️ Avatar: {user_data.get('profile_image_url')}")
-
-        # TODO: Sauvegarder en base de données
+        
+        # Document MongoDB
         user_doc = {
             "clerk_id": user_id,
             "email": primary_email,
@@ -102,30 +98,80 @@ async def handle_user_created(user_data: dict):
             "role": "user"
         }
 
-        print(f"💾 Prêt à sauvegarder: {json.dumps(user_doc, indent=2)}")
+        # Sauvegarde MongoDB
+        try:
+            db = await get_database()
+            users_collection = db["users"]
 
-        logger.info(f"🆕 Utilisateur créé: {primary_email or 'Email non trouvé'}")
+            # Vérifier si existe déjà
+            existing_user = await users_collection.find_one({"clerk_id: user_id"})
+
+            if existing_user:
+                print(f"⚠️ Utilisateur déjà existant: {user_id}")
+            else:
+                result = await users_collection.insert_one(user_doc)
+                print(f"💾 ✅ Utilisateur sauvegardé MongoDB: {result.inserted_id}")
+                logger.info(f"💾 Utilisateur sauvegardé: {primary_email}")
+
+        except Exception as db_error:
+            print(f"❌ Erreur MongoDB: {str(db_error)}")
+            logger.error(f"❌ Erreur MongoDB: {str(db_error)}")
+
+        logger.info(f"🆕 Utilisateur créé: {primary_email or user_id}")
 
     except Exception as e:
         logger.error(f"❌ Erreur création utilisateur: {str(e)}")
-        print(f"❌ Erreur détaillée: {str(e)}")
 
 async def handle_user_updated(user_data: dict):
     """Traite la mise à jour d'un utilisateur"""
-    user_id = user_data.get('id')
-    print(f"🔄 UTILISATEUR MIS À JOUR: {user_id}")
-    logger.info(f"🔄 Utilisateur mis à jour: {user_id}")
+    try:
+        user_id = user_data.get('id')
+        print(f"🔄 UTILISATEUR MIS À JOUR: {user_id}")
 
-    # TODO: Mettre à jour en base de données
+        # mise à jour MongoDB
+        db = await get_database()
+        users_collection = db["users"]
+
+        update_doc = {
+            "username": user_data.get('username'),
+            "first_name": user_data.get('first_name'),
+            "last_name": user_data.get('last_name'),
+            "profile_image": user_data.get('profile_image_url'),
+            "updated_at": user_data.get('updated_at')
+        }
+
+        result = await users_collection.update_one(
+            {"clerk_id": user_id},
+            {"$set": update_doc}
+        )
+
+        print(f"🔄 ✅ Utilisateur mis à jour: {result.modified_count} doc(s)")
+        logger.info(f"🔄 Utilisateur mis à jour: {user_id}")
+
+    except Exception as e:
+        logger.error(f"❌ Erreur mise à jour: {str(e)}")
 
 
 async def handle_user_deleted(user_data: dict):
-    user_id = user_data.get('id')
-    print(f"🗑️ UTILISATEUR SUPPRIMÉ: {user_id}")
-    logger.info(f"🗑️ Utilisateur supprimé: {user_id}")
-    
-    # TODO: Marquer comme supprimé en base de données
+    """Traite la suppression d'un utilisateur"""
+    try:
+        user_id = user_data.get('id')
+        print(f"🗑️ UTILISATEUR SUPPRIMÉ: {user_id}")
 
+        # Suppression MongoDB (soft delete)
+        db = await get_database()
+        users_collection = db["users"]
+
+        result = await users_collection.update_one(
+            {"clerk_id": user_id},
+            {"$set": {"is_active": False, "deleted_at": datetime.now().isoformat()}}
+        )
+
+        print(f"🗑️ ✅ Utilisateur désactivé: {result.modified_count} doc(s)")
+        logger.info(f"🗑️ Utilisateur supprimé: {user_id}")
+
+    except Exception as e:
+        logger.error(f"❌ Erreur suppression: {str(e)}")
 
 @router.get("/test")
 async def test_webhook():
