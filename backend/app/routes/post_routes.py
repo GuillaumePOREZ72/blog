@@ -1,50 +1,128 @@
-from fastapi import APIRouter, HTTPException, Depends, Query, Path
+from fastapi import APIRouter, HTTPException, Depends, Query, status
 from typing import List, Optional
 from bson import ObjectId
+from datetime import datetime
 from ..services.post_service import post_service
+from ..services.database import get_database
 from ..models.post import PostCreate, PostUpdate, PostResponse
-from ..middleware.auth import get_current_user, require_author_or_admin, get_optional_user
+from ..middleware.auth import get_current_user, get_admin_user, get_optional_user
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/posts", tags=["📝 Posts"])
 
-# Create Post
-@router.post("/", response_model=PostResponse, status_code=201)
+# =====================================
+# 🔐 ROUTES PROTÉGÉES (CRUD)
+# =====================================
+
+@router.post("/", response_model=dict)
 async def create_post(
-    post_data: PostCreate,
-    current_user: dict = Depends(require_author_or_admin)
+    post: PostCreate,
+    current_user: dict = Depends(get_current_user)
 ):
-    """
-    🆕 Créer un nouveau post
-    
-    - **Authentification requise** 🔐
-    - **Rôle** : author ou admin
-    - **Slug** : unique et URL-friendly
-    """
+    """✅ Créer un nouveau post - AUTHENTIFICATION REQUISE"""
     try:
-        logger.info(f"📝 Tentative création post par: {current_user.get('clerk_id')}")
+        # Ajouter l'auteur automatiquement
+        post_data = post.model_dump()
+        post_data["author_id"] = current_user.get("clerk_id")
+        post_data["author_email"] = current_user.get("email")
+        post_data["created_at"] = datetime.now()
+        post_data["updated_at"] = datetime.now()
+
+        db = await get_database()
+
+        if db is None:
+            raise HTTPException(status_code=503, detail="Base de données non disponible")
         
-        # Ajouter l'auteur au post
-        post_dict = post_data.model_dump()
-        post_dict["author_id"] = current_user["clerk_id"]
-        
-        # Créer le post
-        new_post = await post_service.create_post(
-            post_data=post_data,
-            author_id=current_user["clerk_id"]
-        )
-        
-        logger.info(f"✅ Post créé avec succès: {new_post.slug}")
-        return new_post
-        
-    except ValueError as e:
-        logger.error(f"❌ Erreur validation: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
+        posts_collection = db["posts"]
+
+        result = await posts_collection.insert_one(post_data)
+
+        return {
+            "success": True,
+            "message": "Post créé avec succès",
+            "post_id": str(result.inserted_id),
+            "author": current_user.get("email")
+        }
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"❌ Erreur création post: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Erreur serveur: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/{post_id}")
+async def update_post(
+    post_id: str, 
+    post_update: PostUpdate,
+    current_user: dict = Depends(get_current_user)
+):
+    """🔄 Mettre à jour un post - AUTHENTIFICATION REQUISE"""
+    try:
+        db = await get_database()
+        posts_collection = db["posts"]
+        
+        # Vérifier que le post existe et que l'utilisateur est propriétaire
+        existing_post = await posts_collection.find_one({"_id": ObjectId(post_id)})
+        
+        if not existing_post:
+            raise HTTPException(status_code=404, detail="Post non trouvé")
+        
+        # Vérifier les permissions (auteur ou admin)
+        if existing_post.get("author_id") != current_user.get("clerk_id"):
+            raise HTTPException(status_code=403, detail="Vous ne pouvez modifier que vos propres posts")
+
+        update_data = {k: v for k, v in post_update.model_dump().items() if v is not None}
+        update_data["updated_at"] = datetime.now()
+
+        await posts_collection.update_one(
+            {"_id": ObjectId(post_id)},
+            {"$set": update_data}
+        )      
+        
+        logger.info(f"✅ Post mis à jour: {post_id}")
+        return {"success": True, "message": "Post mis à jour"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Erreur mise à jour post: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/{post_id}")  # ✅ /posts/{id} au lieu de /posts/posts/{id}
+async def delete_post(
+    post_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """🗑️ Supprimer un post - AUTHENTIFICATION REQUISE"""
+    try:
+        db = await get_database()
+        posts_collection = db["posts"]
+        
+        # Vérifier propriétaire
+        existing_post = await posts_collection.find_one({"_id": ObjectId(post_id)})
+        
+        if not existing_post:
+            raise HTTPException(status_code=404, detail="Post non trouvé")
+        
+        if existing_post.get("author_id") != current_user.get("clerk_id"):
+            raise HTTPException(status_code=403, detail="Vous ne pouvez supprimer que vos propres posts")
+        
+        await posts_collection.delete_one({"_id": ObjectId(post_id)})
+        
+        logger.info(f"✅ Post supprimé: {post_id}")
+        return {"success": True, "message": "Post supprimé"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Erreur suppression post: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# =====================================
+# 📖 ROUTES PUBLIQUES (LECTURE)
+# =====================================
 
 @router.get("/", response_model=List[PostResponse])
 async def list_posts(
@@ -55,13 +133,7 @@ async def list_posts(
     author_id: Optional[str] = Query(None, description="Filtrer par auteur"),
     current_user: Optional[dict] = Depends(get_optional_user)
 ):
-    """
-    📋 Lister les posts avec filtres
-    
-    - **Public** : Posts publiés uniquement
-    - **Authentifié** : Voit aussi ses brouillons
-    - **Admin** : Voit tous les posts
-    """
+    """📋 Lister les posts avec filtres"""
     try:
         logger.info(f"📋 Liste posts demandée par: {current_user.get('clerk_id') if current_user else 'Anonymous'}")
         
@@ -90,7 +162,7 @@ async def get_post_by_slug(
     slug: str,
     current_user: Optional[dict] = Depends(get_optional_user)
 ):
-    """Récupère un post par son slug"""
+    """📖 Récupère un post par son slug"""
     try:
         logger.info(f"🔍 Récupération post slug: {slug}")
         
@@ -112,7 +184,6 @@ async def get_post_by_slug(
     except Exception as e:
         logger.error(f"❌ Erreur récupération post: {str(e)}")
         raise HTTPException(status_code=500, detail="Erreur interne du serveur")
-
 
 @router.get("/{post_id}", response_model=PostResponse)
 async def get_post_by_id(
@@ -142,89 +213,13 @@ async def get_post_by_id(
         logger.error(f"❌ Erreur récupération post: {str(e)}")
         raise HTTPException(status_code=500, detail="Erreur interne du serveur")
 
-
-@router.put("/{post_id}", response_model=PostResponse)
-async def update_post(
-    post_id: str, 
-    post_update: PostUpdate,
-    current_user: dict = Depends(require_author_or_admin)
-):
-    """🔄 Mettre à jour un post"""
-    try:
-        logger.info(f"🔄 Mise à jour post: {post_id} par {current_user.get('clerk_id')}")
-        
-        # Vérifier que le post existe et que l'utilisateur a les droits
-        existing_post = await post_service.get_post_by_id(post_id)
-        if not existing_post:
-            raise HTTPException(status_code=404, detail="Post non trouvé")
-        
-        # Vérifier les permissions (auteur ou admin)
-        if current_user["role"] != "admin" and current_user["clerk_id"] != existing_post.author_id:
-            raise HTTPException(status_code=403, detail="Accès refusé")
-        
-        updated_post = await post_service.update_post_by_id(post_id, post_update)
-        if not updated_post:
-            raise HTTPException(status_code=404, detail="Post non trouvé")
-        
-        logger.info(f"✅ Post mis à jour: {post_id}")
-        return updated_post
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Erreur mise à jour post: {str(e)}")
-        raise HTTPException(status_code=500, detail="Erreur serveur")
-
-
-@router.delete("/{post_id}", status_code=204)
-async def delete_post_by_id(
-    post_id: str = Path(
-        ...,
-        description="ID MongoDB du post (24 caractères hexadécimaux)",
-        example="6888a4ace2ff811da8dcfcbc"
-    ),
-    current_user: dict = Depends(require_author_or_admin)
-):
-    """🗑️ Supprimer un post par son ID"""
-    try:
-        logger.info(f"🗑️ Suppression post ID: {post_id} par {current_user.get('clerk_id')}")
-
-        # Vérifier si c'est un ObjectId valide
-        if not ObjectId.is_valid(post_id):
-           raise HTTPException(
-                status_code=400, 
-                detail=f"ID MongoDB invalide: {post_id}. Utilisez un ObjectId valide (24 caractères hexadécimaux)"
-            )
-
-        # Vérifier que le post existe
-        existing_post = await post_service.get_post_by_id(post_id)
-        if not existing_post:
-            raise HTTPException(status_code=404, detail="Post non trouvé")
-        
-        # Vérifier les permissions (auteur ou admin)
-        if current_user["role"] != "admin" and current_user["clerk_id"] != existing_post.author_id:
-            raise HTTPException(status_code=403, detail="Accès refusé")
-        
-        deleted = await post_service.delete_post_by_id(post_id)
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Post non trouvé")
-        
-        logger.info(f"✅ Post supprimé: {post_id}")
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Erreur suppression post: {str(e)}")
-        raise HTTPException(status_code=500, detail="Erreur serveur")
-
-
 @router.get("/tags/{tag}", response_model=List[PostResponse])
 async def get_posts_by_tag(
     tag: str,
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100)
 ):
-    """Récupère les posts par tag"""
+    """📋 Récupère les posts par tag"""
     try:
         posts = await post_service.get_posts_by_tag(
             tag=tag,
@@ -232,41 +227,9 @@ async def get_posts_by_tag(
             limit=limit
         )
 
-        logger.info(f"Récupération posts tag '{tag}': {len(posts)} trouvés")
+        logger.info(f"✅ Récupération posts tag '{tag}': {len(posts)} trouvés")
         return posts
 
     except Exception as e:
-        logger.error(f"Erreur récupération posts par tag: {str(e)}")
+        logger.error(f"❌ Erreur récupération posts par tag: {str(e)}")
         raise HTTPException(status_code=500, detail="Erreur interne du serveur")
-
-
-@router.delete("/slug/{slug}", status_code=204)
-async def delete_post_by_slug(
-    slug: str,
-    current_user: dict = Depends(require_author_or_admin)
-):
-    """🗑️ Supprimer un post par son slug"""
-    try:
-        logger.info(f"🗑️ Suppression post slug: {slug} par {current_user.get('clerk_id')}")
-        
-        # Vérifier que le post existe
-        existing_post = await post_service.get_post_by_slug(slug)
-        if not existing_post:
-            raise HTTPException(status_code=404, detail="Post non trouvé")
-        
-        # Vérifier les permissions (auteur ou admin)
-        if current_user["role"] != "admin" and current_user["clerk_id"] != existing_post.author_id:
-            raise HTTPException(status_code=403, detail="Accès refusé")
-        
-        # Supprimer le post
-        deleted = await post_service.delete_post(slug)
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Post non trouvé")
-        
-        logger.info(f"✅ Post supprimé par slug: {slug}")
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Erreur suppression post: {str(e)}")
-        raise HTTPException(status_code=500, detail="Erreur serveur")
