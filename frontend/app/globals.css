@@ -120,3 +120,26 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Masquer éléments Clerk spécifiques */
+
+/* Titre "Create your account" */
+.cl-headerTitle,
+.cl-headerSubtitle {
+  display: none !important;
+}
+
+/* Footer "Already have account" */
+.cl-footerAction {
+  display: none !important;
+}
+
+/* Badge "Development mode" */
+.cl-badge {
+  display: none !important;
+}
+
+/* Optionnel : Masquer le divider si vide */
+.cl-dividerRow:empty {
+  display: none !important;
+}
