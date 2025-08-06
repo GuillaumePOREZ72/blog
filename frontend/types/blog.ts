@@ -1,6 +1,7 @@
 export interface Post {
     id: string
     title: string
+    content: string
     slug: string
     excerpt?: string
     tags: string[]
@@ -9,7 +10,7 @@ export interface Post {
     author_email?: string
     featured_image?: string
     created_at?: string
-    updated_at: string
+    updated_at?: string
 }
 
 export interface PostCreate {
@@ -23,7 +24,6 @@ export interface PostCreate {
 }
 
 export interface PostUpdate extends Partial<PostCreate> {
-    id: string
 }
 
 export interface APIResponse<T> {
